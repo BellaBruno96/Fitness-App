@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Training" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#f7f3ee" />
+  <title>Training</title>
+  <link rel="manifest" href="manifest.json" />
+  <!-- Apple touch icon (inline SVG → PNG not possible, use emoji favicon) -->
+  <link rel="apple-touch-icon" href="icon-apple.png" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: #f7f3ee; }
+    #root { height: 100%; }
+    /* Safe area for iPhone notch */
+    body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- React 18 via CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <!-- Babel for JSX transpilation -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useCallback } = React;
+
+
+const uid = () => Math.random().toString(36).slice(2, 9);
+const todayStr = () => new Date().toISOString().split("T")[0];
+const fmtDate = d => new Date(d).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
+const fmtDateLong = d => new Date(d).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "short" });
+const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const EQUIPMENT = ["Langhantel", "Kurzhantel", "Maschine", "Ringe", "Kabelzug", "Körpergewicht", "Kettlebell", "Band"];
+const MUSCLES = ["Brust", "Rücken", "Schultern", "Bizeps", "Trizeps", "Quadrizeps", "Beinbeuger", "Gesäß", "Core", "Wade"];
+
+function parsePauseSecs(str) {
+  if (!str) return 60;
+  const s = String(str).toLowerCase().trim();
+  let t = 0;
+  const m = s.match(/(\d+)\s*m/); const sec = s.match(/(\d+)\s*s/);
+  if (m) t += parseInt(m[1]) * 60; if (sec) t += parseInt(sec[1]);
+  if (!m && !sec) t = parseInt(s) || 60;
+  return t || 60;
+}
+function fmtSecs(s) {
+  const m = Math.floor(s / 60), r = s % 60;
+  return m > 0 ? `${m}:${String(r).padStart(2,"0")}` : `${s}s`;
+}
+
+// ── Storage – works in published artifacts ────────────────────────────────────
+const SK = "fitapp_v11";
+
+// ── Persistent Storage ────────────────────────────────────────────────────────
+// Uses localStorage for persistent storage in standalone PWA.
+
+function ensureFields(d) {
+  if (!d.lastSessions) d.lastSessions = {};
+  if (!d.activeSession) d.activeSession = null;
+  return d;
+}
+
+async function loadAsync() {
+  try {
+    const r = localStorage.getItem(SK);
+    if (r) return ensureFields(JSON.parse(r));
+  } catch {}
+  return buildInitialData();
+}
+
+async function persistAsync(d) {
+  try { localStorage.setItem(SK, JSON.stringify(d)); } catch {}
+}
+
+// Sync fallback for useState initializer (will be overwritten by useEffect)
+function loadSync() {
+  try { const r = localStorage.getItem(SK); if (r) return ensureFields(JSON.parse(r)); } catch {}
+  return buildInitialData();
+}
+
+
+// ── Static initial data (pre-built, no uid() calls at load time) ─────────────
+const INITIAL_DATA = {"folders":[{"id":"f1","name":"Full Body Workout","color":"#c87941"},{"id":"f2","name":"Upper Body Workout","color":"#b89080"},{"id":"f3","name":"Lower Body Workout","color":"#8fa882"},{"id":"f4","name":"Bodyweight Workout","color":"#e8b49a"},{"id":"f5","name":"Running / Intervals","color":"#5a8f6e"},{"id":"f6","name":"Hyrox","color":"#c46b5a"},{"id":"f7","name":"Mobility / Shin Splints / Feet","color":"#d4a574"},{"id":"f8","name":"Cardio / HIITI","color":"#7a9e9f"}],"workouts":[{"id":"qkcuz2o","folderId":"f1","name":"GK May 2026","equipment":["Ringe","Langhantel","Maschine"],"muscles":["Rücken","Quadrizeps"],"note":"Klimmzug an Ringen, proniert zu supiniert\n⚠️ Hinweis: Inhalt basiert auf GK Plan A – bitte im Editor prüfen und ggf. anpassen.","image":null,"blocks":[{"id":"trlz8wp","type":"superset","rounds":4,"exercises":[{"id":"tihk9mi","name":"Klimmzüge an den Ringen, proniert zu supiniert","reps":"5","pause":"1 m 30 s","useTimer":false,"image":null},{"id":"18cswue","name":"Besenstielstretch","reps":"10","pause":"1 m","useTimer":false,"image":null},{"id":"knb3uwi","name":"KH 15° Bankdrücken","reps":"4–6","pause":"1 m 30 s","useTimer":false,"image":null},{"id":"ec4dv7l","name":"LH Kniebeuge, Ferse erhöht","reps":"4–6","pause":"1 m 30 s","useTimer":false,"image":null}]},{"id":"4y9m5o6","type":"regular","rounds":1,"exercises":[{"id":"f568y0p","name":"45 Rückenstrecker","reps":"6–8 × 3 Sätze","pause":"3 m","useTimer":false,"image":null}]}]},{"id":"qoin8io","folderId":"f1","name":"GK – Kniebeugen & Core","equipment":["Langhantel","Maschine"],"muscles":["Schultern","Core"],"note":"","image":null,"blocks":[{"id":"eapqdjz","type":"regular","rounds":1,"exercises":[{"id":"4twghcr","name":"Schulter Stabi","reps":"3","pause":"","useTimer":false,"image":null}]},{"id":"k0nd3qv","type":"superset","rounds":1,"exercises":[{"id":"w99va9d","name":"Taube","reps":"10","pause":"","useTimer":false,"image":null},{"id":"t9ynvkd","name":"Couch stretch","reps":"10","pause":"","useTimer":false,"image":null}]},{"id":"z1xsha9","type":"superset","rounds":6,"exercises":[{"id":"4zx6765","name":"Kniebeuge, Fersen erhöht, pausiert","reps":"4–6","pause":"2 m","useTimer":false,"image":null},{"id":"f4v04zo","name":"Dips mit Band","reps":"3","pause":"2 m","useTimer":false,"image":null}]},{"id":"u9btoh2","type":"superset","rounds":3,"exercises":[{"id":"s7g0msa","name":"Garhammer leg raises","reps":"12","pause":"","useTimer":false,"image":null},{"id":"k8zmk27","name":"L ups","reps":"10","pause":"","useTimer":false,"image":null},{"id":"vr2ucug","name":"knee to chest crunch","reps":"10","pause":"2 m","useTimer":false,"image":null}]},{"id":"71jqktv","type":"superset","rounds":2,"exercises":[{"id":"2hfnmu4","name":"back extension hold","reps":"120 Sek","pause":"1 m 30 s","useTimer":false,"image":null},{"id":"p142s23","name":"zehenheben","reps":"20","pause":"1 m 30 s","useTimer":false,"image":null}]}]},{"id":"nxdzjoo","folderId":"f1","name":"GK – Kreuzheben & Core","equipment":["Langhantel","Maschine"],"muscles":["Schultern","Core"],"note":"","image":null,"blocks":[{"id":"dboinz2","type":"regular","rounds":1,"exercises":[{"id":"mdaa0yg","name":"Schulter Stabi","reps":"3","pause":"","useTimer":false,"image":null}]},{"id":"brn84c4","type":"superset","rounds":6,"exercises":[{"id":"w18s5pp","name":"Dips mit Band","reps":"6","pause":"1 m 30 s","useTimer":false,"image":null},{"id":"pwhvtr7","name":"LH Rumänisches Kreuzheben","reps":"6–8","pause":"1 m 30 s","useTimer":false,"image":null}]},{"id":"hx3um0b","type":"superset","rounds":4,"exercises":[{"id":"h18l7j1","name":"Garhammer leg raises","reps":"12","pause":"","useTimer":false,"image":null},{"id":"p4afa6d","name":"L ups","reps":"10","pause":"","useTimer":false,"image":null},{"id":"86wo2qz","name":"knee to chest crunch","reps":"10","pause":"1 m 30 s","useTimer":false,"image":null},{"id":"lxk74cy","name":"OH lunge","reps":"8","pause":"1 m 30 s","useTimer":false,"image":null}]}]},{"id":"p93ndk8","folderId":"f1","name":"GK – Kreuzheben & Hip Thrust","equipment":["Langhantel","Maschine"],"muscles":["Schultern","Quadrizeps"],"note":"","image":null,"blocks":[{"id":"70j4cvr","type":"regular","rounds":1,"exercises":[{"id":"173389b","name":"Schulter Stabi","reps":"3","pause":"","useTimer":false,"image":null}]},{"id":"2652ahv","type":"superset","rounds":8,"exercises":[{"id":"3fka42s","name":"Dips mit Band","reps":"2","pause":"2 m","useTimer":false,"image":null},{"id":"ei9symq","name":"LH Kreuzheben","reps":"4–6","pause":"2 m","useTimer":false,"image":null}]},{"id":"35p9r9o","type":"superset","rounds":3,"exercises":[{"id":"1zu4ni6","name":"Garhammer leg raises","reps":"12","pause":"","useTimer":false,"image":null},{"id":"j82opwf","name":"L ups","reps":"10","pause":"","useTimer":false,"image":null},{"id":"3qpcybe","name":"knee to chest crunch","reps":"10","pause":"1 m 30 s","useTimer":false,"image":null},{"id":"35afptm","name":"Hip Thrust","reps":"6–8","pause":"1 m 30 s","useTimer":false,"image":null}]}]},{"id":"vggicms","folderId":"f2","name":"OK – Klimmzug & Drücken","equipment":["Langhantel","Band"],"muscles":["Core","Schultern"],"note":"","image":null,"blocks":[{"id":"gmwy7az","type":"regular","rounds":1,"exercises":[{"id":"p33p8bo","name":"Schulter Stabi","reps":"3","pause":"","useTimer":false,"image":null}]},{"id":"q91atvv","type":"superset","rounds":5,"exercises":[{"id":"dwgtlrh","name":"Klimmzug supiniert, schulterbreit","reps":"1–3","pause":"1 m 30 s","useTimer":false,"image":null},{"id":"cl68ogm","name":"LH Flachbankdrücken","reps":"6–8","pause":"1 m 30 s","useTimer":false,"image":null}]},{"id":"nrqjww8","type":"superset","rounds":4,"exercises":[{"id":"o0hgzlm","name":"LH Nackendrücken stehend","reps":"4–6","pause":"1 m 15 s","useTimer":false,"image":null},{"id":"krntap7","name":"Roll outs","reps":"5","pause":"1 m 15 s","useTimer":false,"image":null}]}]},{"id":"7nfskwc","folderId":"f2","name":"OK – Schulter, Core & Powell raise","equipment":["Langhantel"],"muscles":["Schultern","Core"],"note":"","image":null,"blocks":[{"id":"77qvbrh","type":"superset","rounds":5,"exercises":[{"id":"9ydf978","name":"Klimmzug supiniert, schulterbreit","reps":"–","pause":"1 m 30 s","useTimer":false,"image":null},{"id":"qsmfugw","name":"LH Front Drücken","reps":"6–8","pause":"1 m 30 s","useTimer":false,"image":null}]},{"id":"gb51vs7","type":"superset","rounds":3,"exercises":[{"id":"ff9k21i","name":"Garhammer leg raises","reps":"10","pause":"1 m 15 s","useTimer":false,"image":null},{"id":"dezde0q","name":"Powell raise","reps":"8–12","pause":"1 m 15 s","useTimer":false,"image":null}]},{"id":"7y9s4ti","type":"regular","rounds":1,"exercises":[{"id":"2682nk7","name":"Ruder ergometer","reps":"10 Sätze","pause":"1 m","useTimer":false,"image":null}]}]},{"id":"mgfn7ph","folderId":"f2","name":"OK – Latzug & KH","equipment":["Kurzhantel","Langhantel","Maschine","Kabelzug"],"muscles":["Schultern","Brust"],"note":"","image":null,"blocks":[{"id":"jx6wtvp","type":"regular","rounds":1,"exercises":[{"id":"6e8pfb0","name":"Schulter Stabi","reps":"1 × 3","pause":"","useTimer":false,"image":null}]},{"id":"yyl6d7t","type":"superset","rounds":5,"exercises":[{"id":"kwanqzj","name":"Latzug, enger Griff, neutral","reps":"5","pause":"1 m 30 s","useTimer":false,"image":null},{"id":"qtaf53n","name":"30° KH Bankdrücken","reps":"8","pause":"1 m 30 s","useTimer":false,"image":null}]},{"id":"cb4hnxz","type":"superset","rounds":3,"exercises":[{"id":"vbma1e6","name":"LH Nackendrücken, sitzend","reps":"8","pause":"1 m","useTimer":false,"image":null},{"id":"mzc77qy","name":"facepull neutral","reps":"8–12","pause":"1 m","useTimer":false,"image":null}]}]},{"id":"h6jrqbe","folderId":"f2","name":"Core Zirkel","equipment":[],"muscles":["Core"],"note":"","image":null,"blocks":[{"id":"ecfji7i","type":"superset","rounds":4,"exercises":[{"id":"ybu86x8","name":"bear crawl","meters":"10","reps":"","minPerKm":"","kmh":"","pause":"20 s","useTimer":false,"image":null},{"id":"m0x8vo8","name":"v-ups","reps":"20","pause":"20 s","useTimer":false,"image":null},{"id":"lfovvac","name":"swimmer","reps":"15","pause":"20 s","useTimer":false,"image":null},{"id":"0c0232y","name":"Plank Diago","reps":"20","pause":"1 m 30 s","useTimer":false,"image":null}]}]},{"id":"egp1epk","folderId":"f3","name":"UK – Front Squat & Air Bike","equipment":["Langhantel","Maschine"],"muscles":["Gesäß","Quadrizeps"],"note":"","image":null,"blocks":[{"id":"qvg7mia","type":"regular","rounds":1,"exercises":[{"id":"8f3bjox","name":"LH Front Kniebeuge","reps":"5 × 6–8","pause":"3 m","useTimer":false,"image":null}]},{"id":"2p5mjmn","type":"superset","rounds":3,"exercises":[{"id":"zo9zejm","name":"Bulgarian Split squat","reps":"4–6","pause":"1 m 30 s","useTimer":false,"image":null},{"id":"hpnq8bf","name":"45 Rückenstrecker","reps":"8–12","pause":"1 m 30 s","useTimer":false,"image":null}]},{"id":"tno8t0y","type":"regular","rounds":1,"exercises":[{"id":"w6e4ens","name":"Air Bike","reps":"8 × 60 Sek","pause":"2 m","useTimer":false,"image":null}]}]},{"id":"nw9hx85","folderId":"f3","name":"UK – Kraft & Cardio","equipment":["Langhantel","Maschine"],"muscles":["Gesäß","Quadrizeps","Rücken"],"note":"⚠️ Screenshot zeigt 10 Übungen, bitte im Editor prüfen und ergänzen.","image":null,"blocks":[{"id":"ir0bi6e","type":"regular","rounds":1,"exercises":[{"id":"l6pp3io","name":"LH Kniebeuge, Ferse erhöht","reps":"6 × 8","pause":"2 m","useTimer":false,"image":null}]},{"id":"h2fbpp6","type":"superset","rounds":3,"exercises":[{"id":"susfheq","name":"45 Rückenstrecker","reps":"8–12","pause":"1 m 15 s","useTimer":false,"image":null},{"id":"8yj2z7s","name":"Bulgarian Split squat","reps":"6","pause":"1 m 15 s","useTimer":false,"image":null}]},{"id":"re3vnc0","type":"superset","rounds":4,"exercises":[{"id":"aefqdh6","name":"Ruder ergometer","reps":"10 Kalorien","pause":"","useTimer":false,"image":null},{"id":"8nqwju6","name":"Ski ergometer","reps":"10 Kalorien","pause":"","useTimer":false,"image":null},{"id":"rv81qce","name":"Air Bike","reps":"10 Kalorien","pause":"1 m","useTimer":false,"image":null}]}]},{"id":"4kcojz1","folderId":"f3","name":"UK – Front Squat & Hip Thrust","equipment":["Langhantel","Maschine"],"muscles":["Gesäß","Quadrizeps"],"note":"","image":null,"blocks":[{"id":"k98ab40","type":"regular","rounds":1,"exercises":[{"id":"oiyqqa3","name":"LH Front Kniebeuge","reps":"5 × 6–8","pause":"2 m 30 s","useTimer":false,"image":null}]},{"id":"urd5mop","type":"regular","rounds":1,"exercises":[{"id":"qvxuve3","name":"Hip Thrust","reps":"5 × 6–8","pause":"2 m 30 s","useTimer":false,"image":null}]},{"id":"jjl2384","type":"regular","rounds":1,"exercises":[{"id":"38immbx","name":"Bulgarian Split squat","reps":"3 × 6–8","pause":"2 m","useTimer":false,"image":null}]}]},{"id":"384jxgj","folderId":"f3","name":"Leg Burn & Core (Mai 2025)","equipment":["Maschine","Körpergewicht"],"muscles":["Core","Beinbeuger"],"note":"⚠️ Workout wurde in v7 neu erstellt. Bitte Übungen im Editor ergänzen.","image":null,"blocks":[{"id":"v3e1myh","type":"superset","rounds":4,"exercises":[{"id":"kid4isu","name":"Ruder ergometer","reps":"10 Kalorien","pause":"20 s","useTimer":false,"image":null},{"id":"oznvdnh","name":"sandbag lunge","reps":"40m / 20 kg","pause":"20 s","useTimer":false,"image":null},{"id":"tnua310","name":"v-ups","reps":"40","pause":"20 s","useTimer":false,"image":null},{"id":"rtjy1ea","name":"Air Bike","reps":"10 Kalorien","pause":"20 s","useTimer":false,"image":null},{"id":"iuilu5h","name":"Farmers Carry","reps":"40m / 24 kg","pause":"20 s","useTimer":false,"image":null},{"id":"wtyer2g","name":"bear crawl","reps":"10 m","pause":"20 s","useTimer":false,"image":null},{"id":"erny1n4","name":"Ski ergometer","reps":"10 Kalorien","pause":"20 s","useTimer":false,"image":null},{"id":"ky6xg76","name":"high knees","reps":"30 Sek","pause":"20 s","useTimer":false,"image":null},{"id":"fhc4zlb","name":"Mountain Climber X","reps":"30 Sek","pause":"20 s","useTimer":false,"image":null},{"id":"8cbckgz","name":"toaster","reps":"30 Sek","pause":"1 m","useTimer":false,"image":null}]}]},{"id":"lcx8rpe","folderId":"f4","name":"HIIT: 40s on, 20s off","equipment":[],"muscles":["Beinbeuger"],"note":"Super Set: 5 Runden à 5 Übungen. 40 Sek Leistung, 20 Sek Pause. Nach Runde 60 Sek Pause.","image":null,"blocks":[{"id":"zha1fiw","type":"superset","rounds":5,"exercises":[{"id":"yv0l3xl","name":"OH lunge","reps":"40 Sek","pause":"20 s","useTimer":false,"image":null},{"id":"rfgqy07","name":"push up hand to toe","reps":"40 Sek","pause":"20 s","useTimer":false,"image":null},{"id":"cn1l8g6","name":"high knees","reps":"40 Sek","pause":"20 s","useTimer":false,"image":null},{"id":"qdfy8tz","name":"Mountain Climber X","reps":"40 Sek","pause":"20 s","useTimer":false,"image":null},{"id":"d991ofk","name":"toaster","reps":"40 Sek","pause":"1 m","useTimer":false,"image":null}]}]},{"id":"prtbdet","folderId":"f4","name":"HIIT: 45s on, 15s off","equipment":[],"muscles":[],"note":"","image":null,"blocks":[{"id":"uwjko0x","type":"superset","rounds":4,"exercises":[{"id":"9199v8t","name":"high knees","reps":"45 Sek","pause":"15 s","useTimer":false,"image":null},{"id":"hofhmvy","name":"toaster","reps":"45 Sek","pause":"15 s","useTimer":false,"image":null},{"id":"6o6qjer","name":"Mountain Climber X","reps":"45 Sek","pause":"15 s","useTimer":false,"image":null},{"id":"l5oldmg","name":"push up hand to toe","reps":"45 Sek","pause":"15 s","useTimer":false,"image":null},{"id":"wvmimp2","name":"lunge jumps","reps":"45 Sek","pause":"1 m","useTimer":false,"image":null}]}]},{"id":"e2q5nu5","folderId":"f5","name":"Sprint 30sek – All Out","equipment":[],"muscles":[],"note":"Warm up: 10 min easy einlaufen.\n8 × 30 Sek all out laufen, dann 90 Sek gehen.\nCool Down: 10 min auslaufen.","image":null,"blocks":[{"id":"6ij3g3a","type":"superset","rounds":8,"exercises":[{"id":"zig1ez5","name":"sprint","meters":"","reps":"30 Sek","minPerKm":"","kmh":"","pause":"1 m 30 s","useTimer":false,"image":null}]}]},{"id":"qdhiblp","folderId":"f5","name":"Sprint 40sek – All Out","equipment":[],"muscles":[],"note":"Warm up: 10 min easy einlaufen.\n8 × 40 Sek all out laufen, dann 180 Sek gehen.\nCool Down: 10 min auslaufen.","image":null,"blocks":[{"id":"60kjmkc","type":"superset","rounds":8,"exercises":[{"id":"3dcn8f3","name":"sprint","meters":"","reps":"40 Sek","minPerKm":"","kmh":"","pause":"3 m","useTimer":false,"image":null}]}]},{"id":"1rdcb0c","folderId":"f5","name":"Sprint 200m","equipment":[],"muscles":[],"note":"10 × 200m hohes Tempo mit anschließenden 200m langsames Traben. Alle Runden gleiches Tempo.","image":null,"blocks":[{"id":"7ahgny6","type":"superset","rounds":10,"exercises":[{"id":"4wwy1yt","name":"sprint","meters":"200","reps":"","minPerKm":"","kmh":"","pause":"1 m","useTimer":false,"image":null},{"id":"iojoq6z","name":"Traben","meters":"200","reps":"","minPerKm":"","kmh":"","pause":"30 s","useTimer":false,"image":null}]}]},{"id":"swnms1b","folderId":"f5","name":"Sprint 400m","equipment":[],"muscles":[],"note":"10 × 400m, gleicher Pace. Mit 90 Sek Pause. Pace um 5 Sek verbessern wenn alle 10 Runden erfolgreich.","image":null,"blocks":[{"id":"ld3rrbk","type":"superset","rounds":10,"exercises":[{"id":"ve7jj6w","name":"sprint","meters":"400","reps":"","minPerKm":"","kmh":"","pause":"1 m 30 s","useTimer":false,"image":null}]}]},{"id":"q3eu28t","folderId":"f5","name":"Sprint 600m","equipment":[],"muscles":[],"note":"8 × 600m, pace möglichst gleich in allen Runden, 120 Sek aktive Erholung.","image":null,"blocks":[{"id":"9ydklpz","type":"superset","rounds":8,"exercises":[{"id":"kviqxnz","name":"sprint","meters":"600","reps":"","minPerKm":"","kmh":"","pause":"2 m","useTimer":false,"image":null}]}]},{"id":"4qw6thn","folderId":"f5","name":"Sprint 1km – Wettkampf Pace","equipment":[],"muscles":[],"note":"8 Runden × 1km Wettkampf Pace. 90 Sek aktive Erholung (2 min/km langsamer).\nBsp: 4:45er Pace → 6:45er Erholung. Wenn alle 8 Runden: Pace um 5 Sek steigern.","image":null,"blocks":[{"id":"c8epkxn","type":"superset","rounds":8,"exercises":[{"id":"ijzesn9","name":"sprint","meters":"1000","reps":"","minPerKm":"","kmh":"","pause":"1 m 30 s","useTimer":false,"image":null}]}]},{"id":"wur39ko","folderId":"f5","name":"Sprint: 8x 2,5min 4er Pace","equipment":[],"muscles":[],"note":"8 Runden × 150 Sek hohes Tempo (gleiche Pace). 90 Sek aktive Erholung.\nBsp: 150 Sek = 4er Pace, 90 Sek = 6er Pace. Pace um 5 Sek steigern wenn erfolgreich.","image":null,"blocks":[{"id":"hy4aame","type":"superset","rounds":8,"exercises":[{"id":"736m374","name":"sprint","meters":"","reps":"150 Sek","minPerKm":"","kmh":"","pause":"1 m 30 s","useTimer":false,"image":null}]}]},{"id":"lf45ffu","folderId":"f5","name":"Sprint Pyramide","equipment":[],"muscles":[],"note":"5 min warm laufen.\n8 Intervalle: 120/120/90/90/60/60/40/40 Sek Sprint. Zwischen jedem Lauf 3-4 min gehen.\n5 min cooldown.","image":null,"blocks":[{"id":"esu8pva","type":"regular","rounds":1,"exercises":[{"id":"26fybt1","name":"Sprint 120 Sek","reps":"× 2","pause":"3 m 30 s","useTimer":false,"image":null}]},{"id":"bm7qte3","type":"regular","rounds":1,"exercises":[{"id":"09shoyz","name":"Sprint 90 Sek","reps":"× 2","pause":"3 m 30 s","useTimer":false,"image":null}]},{"id":"ng7x66a","type":"regular","rounds":1,"exercises":[{"id":"dw3oe7g","name":"Sprint 60 Sek","reps":"× 2","pause":"3 m","useTimer":false,"image":null}]},{"id":"rxr7vd9","type":"regular","rounds":1,"exercises":[{"id":"5eecjju","name":"Sprint 40 Sek","reps":"× 2","pause":"3 m","useTimer":false,"image":null}]}]},{"id":"6waxb87","folderId":"f5","name":"Hyrox Prep Intervals","equipment":[],"muscles":[],"note":"Hyrox-spezifische Intervalle. ⚠️ Workout in v7 erstellt – bitte Übungen prüfen.","image":null,"blocks":[{"id":"ds6yjqf","type":"superset","rounds":1,"exercises":[{"id":"gghx4hk","name":"Sprint","meters":"1000","reps":"","minPerKm":"","kmh":"","pause":"1 m","useTimer":false,"image":null},{"id":"hggcywu","name":"Ski ergometer","meters":"250","reps":"","minPerKm":"","kmh":"","pause":"1 m","useTimer":false,"image":null},{"id":"kmgqgjl","name":"Rudern","meters":"250","reps":"","minPerKm":"","kmh":"","pause":"1 m","useTimer":false,"image":null},{"id":"fqdc0v3","name":"burpee Broad jumps","meters":"25","reps":"","minPerKm":"","kmh":"","pause":"1 m","useTimer":false,"image":null},{"id":"zx79dmh","name":"sandbag lunge (20kg)","meters":"25","reps":"","minPerKm":"","kmh":"","pause":"2 m","useTimer":false,"image":null}]}]},{"id":"jrynlme","folderId":"f5","name":"Schnelle 400m & 200m","equipment":[],"muscles":[],"note":"⚠️ Workout in v7 erstellt – bitte Übungen und Runden prüfen.","image":null,"blocks":[{"id":"6w47cwc","type":"superset","rounds":8,"exercises":[{"id":"cfc9k2k","name":"Sprint","meters":"400","reps":"","minPerKm":"","kmh":"","pause":"1 m 30 s","useTimer":false,"image":null},{"id":"jtty2yb","name":"Sprint","meters":"200","reps":"","minPerKm":"","kmh":"","pause":"1 m","useTimer":false,"image":null}]}]},{"id":"e5s4e1j","folderId":"f6","name":"HYROX Women Pro (Race Simulation)","equipment":[],"muscles":[],"note":"Race simulation – alle Stationen einmal durch ohne Running.\nGewichte Women Pro Kategorie.","image":null,"blocks":[{"id":"41wm4dp","type":"superset","rounds":1,"exercises":[{"id":"ealtqlu","name":"Ski ergometer","meters":"500","reps":"","minPerKm":"","kmh":"","pause":"30 s","useTimer":false,"image":null},{"id":"gta6oy9","name":"sled push (125kg)","meters":"20","reps":"","minPerKm":"","kmh":"","pause":"30 s","useTimer":false,"image":null},{"id":"5lavwgy","name":"sled pull (175kg)","meters":"20","reps":"","minPerKm":"","kmh":"","pause":"30 s","useTimer":false,"image":null},{"id":"1gwfcov","name":"burpee Broad jumps","meters":"50","reps":"","minPerKm":"","kmh":"","pause":"30 s","useTimer":false,"image":null},{"id":"frlttpf","name":"Rudern","meters":"500","reps":"","minPerKm":"","kmh":"","pause":"30 s","useTimer":false,"image":null},{"id":"cz1ef28","name":"Farmers Carry (24kg)","meters":"100","reps":"","minPerKm":"","kmh":"","pause":"30 s","useTimer":false,"image":null},{"id":"4mm5jkd","name":"sandbag lunge (20kg)","meters":"50","reps":"","minPerKm":"","kmh":"","pause":"30 s","useTimer":false,"image":null},{"id":"nwkt43l","name":"wall balls","reps":"50 × 6 kg","pause":"5 m","useTimer":false,"image":null}]}]},{"id":"2izr1xj","folderId":"f6","name":"HYROX Pro (2 Runden)","equipment":[],"muscles":[],"note":"Alle Hyrox Übungen ohne Läufe. Mittelstufe – mittlere Distanzen, 2 Runden.","image":null,"blocks":[{"id":"eo5p5he","type":"superset","rounds":2,"exercises":[{"id":"0tc32c7","name":"Ski ergometer","meters":"500","reps":"","minPerKm":"","kmh":"","pause":"30 s","useTimer":false,"image":null},{"id":"mvdrra5","name":"sled push (102kg)","meters":"25","reps":"","minPerKm":"","kmh":"","pause":"30 s","useTimer":false,"image":null},{"id":"i3oacq6","name":"sled pull (75kg)","meters":"25","reps":"","minPerKm":"","kmh":"","pause":"30 s","useTimer":false,"image":null},{"id":"63uj03x","name":"burpee Broad jumps","meters":"40","reps":"","minPerKm":"","kmh":"","pause":"30 s","useTimer":false,"image":null},{"id":"wa5bg5m","name":"Rudern","meters":"500","reps":"","minPerKm":"","kmh":"","pause":"30 s","useTimer":false,"image":null},{"id":"oypo8py","name":"Farmers Carry (24kg)","meters":"100","reps":"","minPerKm":"","kmh":"","pause":"30 s","useTimer":false,"image":null},{"id":"txh7zw0","name":"sandbag lunge (20kg)","meters":"50","reps":"","minPerKm":"","kmh":"","pause":"30 s","useTimer":false,"image":null},{"id":"3nz9t1a","name":"wall balls","reps":"50 × 6 kg","pause":"5 m","useTimer":false,"image":null}]}]},{"id":"x8ku3i8","folderId":"f6","name":"Ski + Ruder Workout","equipment":[],"muscles":[],"note":"","image":null,"blocks":[{"id":"rn95pun","type":"regular","rounds":1,"exercises":[{"id":"hg50e0w","name":"Rudern","meters":"250","reps":"","minPerKm":"","kmh":"","pause":"1 m","useTimer":false,"image":null}]},{"id":"qipaeck","type":"regular","rounds":1,"exercises":[{"id":"k6wod88","name":"Ski ergometer","meters":"150","reps":"","minPerKm":"","kmh":"","pause":"30 s","useTimer":false,"image":null}]}]},{"id":"usix6p3","folderId":"f7","name":"Rücken Mobi 1","equipment":[],"muscles":["Rücken"],"note":"","image":null,"blocks":[{"id":"u8qh4m5","type":"superset","rounds":3,"exercises":[{"id":"1bcohe8","name":"Aushängen","reps":"40 Sek","pause":"","useTimer":false,"image":null},{"id":"ygohvqt","name":"Cat Cow","reps":"8","pause":"","useTimer":false,"image":null},{"id":"w1ey8oi","name":"Brücke","reps":"8","pause":"","useTimer":false,"image":null},{"id":"eq8zk28","name":"Jefferson curl","reps":"8 / 10 kg","pause":"","useTimer":false,"image":null},{"id":"qdj8gcm","name":"90° Hüftrotation","reps":"8","pause":"","useTimer":false,"image":null},{"id":"1krkd2x","name":"Taube","reps":"40 Sek","pause":"","useTimer":false,"image":null},{"id":"rap4ho8","name":"Couch stretch","reps":"40 Sek","pause":"","useTimer":false,"image":null}]}]},{"id":"l5rhxe4","folderId":"f7","name":"Rücken Mobi – Einstieg","equipment":[],"muscles":["Rücken"],"note":"","image":null,"blocks":[{"id":"qa05i17","type":"superset","rounds":3,"exercises":[{"id":"3vxw1xt","name":"Cat Cow","reps":"8","pause":"","useTimer":false,"image":null},{"id":"tfz0prj","name":"Brücke","reps":"8","pause":"","useTimer":false,"image":null},{"id":"itgl9ry","name":"Jefferson curl","reps":"8 / 8 kg","pause":"","useTimer":false,"image":null}]}]},{"id":"u5zojd9","folderId":"f7","name":"Fuß Aufbau 1","equipment":[],"muscles":["Wade"],"note":"","image":null,"blocks":[{"id":"hh7a3fq","type":"superset","rounds":1,"exercises":[{"id":"z1bzigt","name":"Zehen Stretching","reps":"60 Sek","pause":"","useTimer":false,"image":null},{"id":"s1v42e8","name":"Wadenheber 3","reps":"20","pause":"","useTimer":false,"image":null},{"id":"swv19gf","name":"Zehen Spreitzer Level 2","reps":"12","pause":"","useTimer":false,"image":null},{"id":"lnq9jc2","name":"Fuß Rotation","reps":"12","pause":"","useTimer":false,"image":null},{"id":"v1knxxj","name":"Zehen Koordination","reps":"12","pause":"","useTimer":false,"image":null}]}]},{"id":"7joqpgv","folderId":"f7","name":"Shin Splint","equipment":["Maschine"],"muscles":["Wade"],"note":"","image":null,"blocks":[{"id":"aou0zor","type":"superset","rounds":3,"exercises":[{"id":"ra6cd8z","name":"zehenheben","reps":"20","pause":"1 m","useTimer":false,"image":null},{"id":"suntcs7","name":"Wadenheben","reps":"6–8","pause":"1 m","useTimer":false,"image":null},{"id":"9stbeyi","name":"Wadenheber 2","reps":"6–8","pause":"1 m","useTimer":false,"image":null},{"id":"b0l7kw7","name":"Wadenheber 3","reps":"20","pause":"1 m","useTimer":false,"image":null},{"id":"iq0wvdp","name":"Trigger Wade Innenseite","reps":"60 Sek","pause":"1 m","useTimer":false,"image":null}]}]},{"id":"sh2qt8r","folderId":"f8","name":"40/20 HIT / Core","equipment":["Kettlebell","Kurzhantel"],"muscles":["Beinbeuger","Core","Quadrizeps"],"note":"","image":null,"blocks":[{"id":"c6xoe3o","type":"superset","rounds":5,"exercises":[{"id":"hsn9s2x","name":"KB Swinger","reps":"40 Sek","pause":"20 s","useTimer":false,"image":null},{"id":"v6jzao5","name":"v-ups","reps":"40 Sek","pause":"20 s","useTimer":false,"image":null},{"id":"mmq91kc","name":"KB Snatch","reps":"40 Sek","pause":"20 s","useTimer":false,"image":null},{"id":"b8mt1ic","name":"bear crawl","reps":"40 Sek","pause":"20 s","useTimer":false,"image":null},{"id":"rm3cvys","name":"KH Thruster","reps":"40 Sek","pause":"1 m","useTimer":false,"image":null}]},{"id":"vky15g4","type":"regular","rounds":1,"exercises":[{"id":"avydoy9","name":"high knees","reps":"10 × 20 Sek","pause":"10 s","useTimer":false,"image":null}]}]},{"id":"ah3yp9m","folderId":"f8","name":"40min Cardio (Row, Bike & Plank)","equipment":[],"muscles":["Core"],"note":"","image":null,"blocks":[{"id":"l3gde65","type":"superset","rounds":10,"exercises":[{"id":"oa62zp8","name":"Ruder ergometer","reps":"10 Kalorien","pause":"","useTimer":false,"image":null},{"id":"lein6dc","name":"Plank","reps":"35 Sek","pause":"","useTimer":false,"image":null},{"id":"pi40zvz","name":"Air Bike","reps":"10 Kalorien","pause":"1 m","useTimer":false,"image":null}]}]},{"id":"ay4mp4z","folderId":"f8","name":"HIIT Kraft","equipment":["Kurzhantel","Kettlebell"],"muscles":["Quadrizeps","Beinbeuger","Core"],"note":"Absteigende Runden: Start 24, jede Runde -2 Wdh/Cal.","image":null,"blocks":[{"id":"0yshc5t","type":"superset","rounds":7,"exercises":[{"id":"ld6q6iz","name":"Air Bike","reps":"24 Kalorien","pause":"","useTimer":false,"image":null},{"id":"oqike0u","name":"KH Thruster","reps":"24 / 5 kg","pause":"","useTimer":false,"image":null},{"id":"mktryf8","name":"KB Swinger","reps":"24 / 12 kg","pause":"","useTimer":false,"image":null},{"id":"vpnnsqk","name":"burpee","reps":"24","pause":"","useTimer":false,"image":null},{"id":"aqxie08","name":"v-ups","reps":"24","pause":"","useTimer":false,"image":null}]}]}],"sessions":[],"weights":[]};
+
+function buildInitialData() {
+  // Deep clone so mutations don't affect the constant
+  const base = JSON.parse(JSON.stringify(INITIAL_DATA));
+  if (!base.lastSessions) base.lastSessions = {};   // {workoutId: sessionState}
+  if (!base.activeSession) base.activeSession = null; // in-progress session
+  return base;
+}
+
+// ── Templates ─────────────────────────────────────────────────────────────────
+const newStrEx = () => ({ id: uid(), name: "", reps: "", pause: "1 m 30 s", useTimer: false, image: null });
+const newCardioEx = () => ({ id: uid(), name: "", meters: "", minPerKm: "", kmh: "", pause: "1 m", image: null });
+const newBlock = (type = "superset") => ({ id: uid(), type, rounds: type === "superset" ? 3 : 1, exercises: type === "cardio" ? [newCardioEx()] : [newStrEx()] });
+const newWorkout = (folderId = "f1") => ({ id: uid(), name: "", folderId, equipment: [], muscles: [], blocks: [newBlock("superset")], note: "", image: null });
+const FOLDER_COLORS = ["#c87941","#b89080","#e8b49a","#8fa882","#5a8f6e","#c46b5a","#d4a574","#9aab8a"];
+const newFolder = () => ({ id: uid(), name: "Neuer Ordner", color: FOLDER_COLORS[Math.floor(Math.random() * FOLDER_COLORS.length)] });
+
+// ── CSS ───────────────────────────────────────────────────────────────────────
+const CSS = `
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=DM+Mono:wght@400;500&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  input, textarea, button, select { font-family: inherit; }
+  input:focus, textarea:focus, button:focus { outline: none; }
+  ::-webkit-scrollbar { width: 3px; }
+  ::-webkit-scrollbar-thumb { background: #c9b8a8; border-radius: 2px; }
+  ::placeholder { color: #b0a090; }
+`;
+
+const T = {
+  bg: "#f7f3ee", surface: "#ffffff", surfaceHover: "#f2ede6",
+  border: "#e2d8cc", borderLight: "#ede5da",
+  text: "#3a2e25", textMuted: "#9c8878", textSub: "#b8a898",
+  accent: "#c87941", green: "#5a8f6e", greenSoft: "#5a8f6e18",
+  red: "#c46b5a", blue: "#7a9e9f",
+  mono: "'DM Mono', monospace", sans: "'DM Sans', sans-serif",
+};
+
+const S = {
+  app: { fontFamily: T.sans, background: T.bg, minHeight: "100vh", maxWidth: 480, margin: "0 auto", color: T.text, paddingBottom: 90 },
+  card: { background: T.surface, borderRadius: 16, padding: 16, marginBottom: 10, border: `1px solid ${T.border}`, boxShadow: "0 1px 4px rgba(58,46,37,0.06)" },
+  lbl: { fontSize: 11, fontWeight: 600, color: T.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", margin: "18px 0 8px" },
+  btnPrimary: { width: "100%", padding: "14px", background: T.accent, color: "#fff", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 600, cursor: "pointer", marginTop: 8 },
+  btnDark: { width: "100%", padding: "14px", background: T.surfaceHover, color: T.text, border: `1px solid ${T.border}`, borderRadius: 12, fontSize: 14, fontWeight: 500, cursor: "pointer", marginTop: 8 },
+  btnRed: { width: "100%", padding: "14px", background: "rgba(196,107,90,0.1)", color: T.red, border: `1px solid rgba(196,107,90,0.25)`, borderRadius: 12, fontSize: 14, fontWeight: 600, cursor: "pointer", marginTop: 8 },
+  btnSm: { padding: "7px 14px", background: T.surfaceHover, color: T.text, border: `1px solid ${T.border}`, borderRadius: 9, fontSize: 13, fontWeight: 500, cursor: "pointer" },
+  btnSmAccent: { padding: "7px 14px", background: T.accent, color: "#fff", border: "none", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer" },
+  btnGhost: { padding: "9px 14px", background: "transparent", color: T.textSub, border: `1px dashed ${T.border}`, borderRadius: 10, fontSize: 12, fontWeight: 500, cursor: "pointer" },
+  btnDanger: { padding: "5px 10px", background: "rgba(196,107,90,0.1)", color: T.red, border: "none", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer" },
+  inp: { width: "100%", background: T.surfaceHover, border: `1px solid ${T.border}`, borderRadius: 10, padding: "11px 13px", fontSize: 14, color: T.text },
+  inpSm: { background: T.surfaceHover, border: `1px solid ${T.border}`, borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: T.mono, color: T.text },
+  pill: (active, color = T.accent) => ({ padding: "5px 12px", borderRadius: 20, fontSize: 12, fontWeight: 500, cursor: "pointer", border: `1px solid ${active ? color : T.border}`, background: active ? color + "22" : T.surfaceHover, color: active ? color : T.textMuted }),
+  chk: c => ({ width: 28, height: 28, borderRadius: 9, border: c ? "none" : `2px solid ${T.border}`, background: c ? T.green : "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, transition: "all .15s" }),
+};
+
+function PauseTimer({ timer, onStop }) {
+  if (!timer) return null;
+  const pct = timer.total > 0 ? (timer.rem / timer.total) * 100 : 0;
+  const urgent = timer.rem <= 5;
+  return (
+    <div style={{
+      position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)",
+      width: "100%", maxWidth: 480, zIndex: 500,
+      background: urgent ? T.red : T.surface,
+      borderTop: `2px solid ${urgent ? T.red : T.accent}`,
+      padding: "10px 16px 14px",
+      boxShadow: "0 -4px 20px rgba(58,46,37,0.15)",
+      display: "flex", alignItems: "center", gap: 12,
+    }}>
+      {/* Progress bar across top */}
+      <div style={{ position: "absolute", top: 0, left: 0, height: 3, background: urgent ? "rgba(255,255,255,0.3)" : T.border, width: "100%" }}>
+        <div style={{ height: "100%", background: urgent ? "#fff" : T.accent, width: `${pct}%`, transition: "width 1s linear", borderRadius: 2 }} />
+      </div>
+      <div style={{ fontSize: 11, color: urgent ? "rgba(255,255,255,0.8)" : T.textMuted, textTransform: "uppercase", letterSpacing: "0.08em", flexShrink: 0 }}>Pause</div>
+      <div style={{ fontFamily: T.mono, fontSize: 28, fontWeight: 700, color: urgent ? "#fff" : T.text, minWidth: 60 }}>{fmtSecs(timer.rem)}</div>
+      {timer.exName && <div style={{ fontSize: 12, color: urgent ? "rgba(255,255,255,0.75)" : T.textMuted, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{timer.exName}</div>}
+      <button onClick={onStop} style={{ background: urgent ? "rgba(255,255,255,0.2)" : T.surfaceHover, border: `1px solid ${urgent ? "rgba(255,255,255,0.3)" : T.border}`, borderRadius: 9, padding: "7px 14px", fontSize: 13, fontWeight: 600, color: urgent ? "#fff" : T.text, cursor: "pointer", flexShrink: 0 }}>
+        Überspringen →
+      </button>
+    </div>
+  );
+}
+
+function ConfirmDialog({ msg, onConfirm, onCancel }) {
+  if (!msg) return null;
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(58,46,37,0.5)", zIndex: 998, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 24px" }}>
+      <div style={{ background: T.surface, borderRadius: 20, padding: "24px", width: "100%", maxWidth: 340, boxShadow: "0 8px 32px rgba(58,46,37,0.2)" }}>
+        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>Bist du sicher?</div>
+        <div style={{ fontSize: 14, color: T.textMuted, lineHeight: 1.5, marginBottom: 20 }}>{msg}</div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button style={{ flex: 1, padding: "11px", background: T.surfaceHover, color: T.text, border: `1px solid ${T.border}`, borderRadius: 10, fontSize: 14, fontWeight: 500, cursor: "pointer" }} onClick={onCancel}>Abbrechen</button>
+          <button style={{ flex: 1, padding: "11px", background: T.red, color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: "pointer" }} onClick={onConfirm}>Löschen</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FolderName({ folder, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(folder.name);
+  const ref = useRef(null);
+  useEffect(() => { if (editing) ref.current?.focus(); }, [editing]);
+  if (editing) return (
+    <input ref={ref} style={{ background: "transparent", border: "none", color: T.text, fontSize: 14, fontWeight: 600, width: "100%" }}
+      value={val} onChange={e => setVal(e.target.value)} onClick={e => e.stopPropagation()}
+      onBlur={() => { onSave({ ...folder, name: val || folder.name }); setEditing(false); }}
+      onKeyDown={e => { if (e.key === "Enter") { onSave({ ...folder, name: val || folder.name }); setEditing(false); } e.stopPropagation(); }} />
+  );
+  return <span style={{ fontSize: 14, fontWeight: 600, cursor: "text", display: "block" }} onClick={e => { e.stopPropagation(); setEditing(true); }}>{folder.name}</span>;
+}
+
+// ── Simple SVG weight chart (no external dependency) ─────────────────────────
+function MiniChart({ data }) {
+  const W = 320, H = 120, PX = 28, PY = 10;
+  const vals = data.map(d => d.kg);
+  const minV = Math.min(...vals), maxV = Math.max(...vals);
+  const range = maxV - minV || 1;
+  const xs = data.map((_, i) => PX + (i / Math.max(data.length - 1, 1)) * (W - PX * 2));
+  const ys = data.map(d => PY + (1 - (d.kg - minV) / range) * (H - PY * 2));
+  const path = xs.map((x, i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${ys[i].toFixed(1)}`).join(' ');
+  const area = path + ` L${xs[xs.length-1].toFixed(1)},${H-PY} L${xs[0].toFixed(1)},${H-PY} Z`;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: H, display: "block" }}>
+      <defs><linearGradient id="wg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={T.accent} stopOpacity="0.15"/><stop offset="100%" stopColor={T.accent} stopOpacity="0"/></linearGradient></defs>
+      {[0,0.5,1].map(t => {
+        const y = PY + t * (H - PY * 2);
+        return <line key={t} x1={PX} y1={y} x2={W-PX} y2={y} stroke={T.border} strokeWidth="1" />;
+      })}
+      <path d={area} fill="url(#wg)" />
+      <path d={path} fill="none" stroke={T.accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      {xs.map((x, i) => <circle key={i} cx={x} cy={ys[i]} r="3" fill={T.accent} />)}
+      {data.map((d, i) => i % Math.ceil(data.length / 4) === 0 && (
+        <text key={i} x={xs[i]} y={H-2} textAnchor="middle" fontSize="9" fill={T.textMuted} fontFamily="DM Mono">{d.date}</text>
+      ))}
+      <text x={PX-2} y={PY+4} textAnchor="end" fontSize="9" fill={T.textMuted} fontFamily="DM Mono">{maxV}</text>
+      <text x={PX-2} y={H-PY} textAnchor="end" fontSize="9" fill={T.textMuted} fontFamily="DM Mono">{minV}</text>
+    </svg>
+  );
+}
+
+function App() {
+  const [tab, setTab] = useState("home");
+  const [data, setData] = useState(loadSync);
+  const [view, setView] = useState(null);
+  const [bwInput, setBwInput] = useState("");
+  const [openFolders, setOpenFolders] = useState({});
+  const [confirm, setConfirm] = useState(null);
+
+  // Load from Artifact Storage on mount (permanent persistence)
+  useEffect(() => {
+    loadAsync().then(d => setData(d)).catch(() => {});
+  }, []);
+
+  const upd = fn => setData(prev => { const n = JSON.parse(JSON.stringify(prev)); fn(n); persistAsync(n); return n; });
+  const saveWorkout = w => { upd(d => { const i = d.workouts.findIndex(x => x.id === w.id); if (i >= 0) d.workouts[i] = w; else d.workouts.push(w); }); setView(null); };
+  const deleteWorkout = id => { upd(d => { d.workouts = d.workouts.filter(w => w.id !== id); }); setView(null); };
+  const saveFolder = f => { upd(d => { const i = d.folders.findIndex(x => x.id === f.id); if (i >= 0) d.folders[i] = f; else d.folders.push(f); }); };
+  const deleteFolder = id => { upd(d => { d.folders = d.folders.filter(f => f.id !== id); d.workouts = d.workouts.filter(w => w.folderId !== id); }); };
+  const askDelete = (msg, fn) => setConfirm({ msg, onConfirm: () => { fn(); setConfirm(null); } });
+  const saveSession = s => {
+    upd(d => {
+      d.sessions = [s, ...d.sessions];
+      d.lastSessions[s.workoutId] = s.state; // store for prefill
+      d.activeSession = null;                 // clear in-progress
+    });
+    setView(null);
+    setTab("progress");
+  };
+  const saveActiveSession = (workoutId, state, note, pct) => {
+    upd(d => { d.activeSession = { workoutId, state, note, pct, savedAt: Date.now() }; });
+  };
+  const clearActiveSession = () => { upd(d => { d.activeSession = null; }); };
+  const addWeight = () => {
+    const v = parseFloat(bwInput.replace(",", "."));
+    if (isNaN(v) || v < 30 || v > 250) return;
+    upd(d => { d.weights = [...d.weights, { date: todayStr(), kg: v }].sort((a, b) => a.date.localeCompare(b.date)); });
+    setBwInput("");
+  };
+
+  if (view?.type === "builder") return <Builder w={view.payload} folders={data.folders} onSave={saveWorkout} onDelete={(id) => askDelete("Workout wirklich löschen? Das kann nicht rückgängig gemacht werden.", () => deleteWorkout(id))} onBack={() => setView(null)} />;
+  if (view?.type === "session") return <Session
+    w={view.payload}
+    lastState={data.lastSessions?.[view.payload.id] || null}
+    activeSession={data.activeSession?.workoutId === view.payload.id ? data.activeSession : null}
+    onFinish={saveSession}
+    onSaveProgress={saveActiveSession}
+    onClearActive={clearActiveSession}
+    onBack={() => setView(null)}
+  />;
+  if (view?.type === "detail") return <Detail s={view.payload} workouts={data.workouts} onBack={() => setView(null)} />;
+
+  const lw = data.weights.at(-1);
+  const wd = data.weights.length >= 2 ? (data.weights.at(-1).kg - data.weights[0].kg).toFixed(1) : null;
+  const wcd = data.weights.slice(-16).map(w => ({ date: fmtDate(w.date), kg: w.kg }));
+  const toggleFolder = id => setOpenFolders(p => ({ ...p, [id]: !p[id] }));
+  // Folders default to closed (openFolders[id] === undefined → closed)
+
+  return (
+    <div style={S.app}>
+      <style>{CSS}</style>
+      <ConfirmDialog msg={confirm?.msg} onConfirm={confirm?.onConfirm} onCancel={() => setConfirm(null)} />
+      <div style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, position: "sticky", top: 0, zIndex: 100, boxShadow: "0 1px 8px rgba(58,46,37,0.07)" }}>
+        <div style={{ padding: "16px 18px 0" }}>
+          <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.03em", color: T.text }}>Training</div>
+          <div style={{ fontSize: 12, color: T.textMuted, marginTop: 1 }}>{new Date().toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" })}</div>
+        </div>
+        <div style={{ display: "flex", padding: "0 18px", marginTop: 12 }}>
+          {[["home","Workouts"],["progress","Fortschritt"]].map(([t,l]) => (
+            <button key={t} onClick={() => setTab(t)} style={{ flex: 1, background: "none", border: "none", cursor: "pointer", padding: "10px 0", fontSize: 13, fontWeight: tab===t ? 600 : 400, color: tab===t ? T.text : T.textMuted, borderBottom: `2px solid ${tab===t ? T.accent : "transparent"}`, transition: "all .15s" }}>{l}</button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ padding: "14px 14px" }}>
+        {tab === "home" && <>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <div style={S.lbl}>Ordner & Workouts</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button style={S.btnSm} onClick={() => { const f = newFolder(); saveFolder(f); setOpenFolders(p => ({...p, [f.id]: true})); }}>+ Ordner</button>
+              <button style={S.btnSmAccent} onClick={() => setView({ type: "builder", payload: newWorkout(data.folders[0]?.id) })}>+ Workout</button>
+            </div>
+          </div>
+
+          {data.folders.map(folder => {
+            const folderWorkouts = data.workouts.filter(w => w.folderId === folder.id);
+            const isOpen = !!openFolders[folder.id]; // default closed
+            return (
+              <div key={folder.id} style={{ marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: T.surface, borderRadius: isOpen && folderWorkouts.length > 0 ? "14px 14px 0 0" : 14, border: `1px solid ${T.border}`, cursor: "pointer", boxShadow: "0 1px 4px rgba(58,46,37,0.06)" }}
+                  onClick={() => toggleFolder(folder.id)}>
+                  <div style={{ width: 10, height: 10, borderRadius: 3, background: folder.color, flexShrink: 0 }} />
+                  <div style={{ flex: 1 }}><FolderName folder={folder} onSave={saveFolder} /></div>
+                  <span style={{ fontSize: 12, color: T.textMuted, fontFamily: T.mono }}>{folderWorkouts.length}</span>
+                  <span style={{ color: T.textMuted, fontSize: 13, transform: isOpen ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform .2s", display: "inline-block" }}>▾</span>
+                  <button style={{ ...S.btnDanger, padding: "4px 8px", fontSize: 11 }} onClick={e => { e.stopPropagation(); askDelete(`Ordner "${folder.name}" und alle enthaltenen Workouts löschen?`, () => deleteFolder(folder.id)); }}>✕</button>
+                </div>
+                {isOpen && (
+                  <div style={{ background: T.bg, border: `1px solid ${T.border}`, borderTop: "none", borderRadius: "0 0 14px 14px", overflow: "hidden" }}>
+                    {folderWorkouts.map((w, wi) => {
+                      const exCount = w.blocks.reduce((s,b) => s+b.exercises.length, 0);
+                      const hasCardio = w.blocks.some(b => b.type === "cardio") || w.blocks.some(b => b.exercises.some(e => e.meters));
+                      const sessCount = data.sessions.filter(s => s.workoutId === w.id).length;
+                      return (
+                        <div key={w.id} style={{ padding: "14px", borderBottom: wi < folderWorkouts.length - 1 ? `1px solid ${T.border}` : "none", background: T.surface }}>
+                          <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                            {w.image ? (
+                              <div style={{ width: 60, height: 60, borderRadius: 10, overflow: "hidden", flexShrink: 0 }}>
+                                <img src={w.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                              </div>
+                            ) : (
+                              <div style={{ width: 60, height: 60, borderRadius: 10, background: folder.color + "20", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>🏋️</div>
+                            )}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                                <div style={{ fontSize: 15, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{w.name || "Unbenannt"}</div>
+                                {hasCardio && <span style={{ fontSize: 10, background: T.blue + "20", color: T.blue, padding: "2px 7px", borderRadius: 20, fontWeight: 600, flexShrink: 0 }}>Cardio</span>}
+                              </div>
+                              {(() => {
+                                const lastS = data.sessions.find(s => s.workoutId === w.id);
+                                return <div style={{ fontSize: 12, color: T.textMuted }}>
+                                  {exCount} Übungen · {sessCount}× absolviert
+                                  {lastS && <span style={{ color: T.textSub }}> · zuletzt {fmtDateLong(lastS.date)}</span>}
+                                </div>;
+                              })()}
+                              {w.muscles.length > 0 && <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 6 }}>{w.muscles.slice(0,3).map(m => <span key={m} style={{ fontSize: 10, background: T.greenSoft, color: T.green, padding: "2px 8px", borderRadius: 20, fontWeight: 500 }}>{m}</span>)}</div>}
+                              {w.note && <div style={{ fontSize: 12, color: T.textSub, fontStyle: "italic", lineHeight: 1.5, marginTop: 6, background: T.surfaceHover, borderRadius: 8, padding: "6px 10px" }}>"{w.note.slice(0,80)}{w.note.length > 80 ? "…" : ""}"</div>}
+                            </div>
+                            <button style={{ ...S.btnSm, fontSize: 12, padding: "5px 10px", flexShrink: 0 }} onClick={() => setView({ type: "builder", payload: JSON.parse(JSON.stringify(w)) })}>✏️</button>
+                          </div>
+                          <button style={{ ...S.btnPrimary, marginTop: 12, fontSize: 14, padding: "12px" }} onClick={() => setView({ type: "session", payload: w })}>Trainingseinheit beginnen</button>
+                        </div>
+                      );
+                    })}
+                    <div style={{ padding: "10px 14px", background: T.bg }}>
+                      <button style={{ ...S.btnGhost, width: "100%", fontSize: 12, color: folder.color, borderColor: folder.color + "55" }} onClick={() => setView({ type: "builder", payload: newWorkout(folder.id) })}>+ Workout zu „{folder.name}" hinzufügen</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </>}
+
+        {tab === "progress" && <>
+          <div style={S.lbl}>Körpergewicht</div>
+          <div style={S.card}>
+            <div style={{ display: "flex", gap: 8, marginBottom: 14, alignItems: "center" }}>
+              <input style={{ ...S.inpSm, flex: 1 }} placeholder="z.B. 65.4" value={bwInput} onChange={e => setBwInput(e.target.value)} type="number" inputMode="decimal" />
+              <span style={{ fontSize: 13, color: T.textMuted }}>kg</span>
+              <button style={S.btnSmAccent} onClick={addWeight}>Eintragen</button>
+              {lw && <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 19, fontWeight: 700, fontFamily: T.mono }}>{lw.kg}<span style={{ fontSize: 12, fontWeight: 400, marginLeft: 3 }}>kg</span></div>
+                {wd !== null && <div style={{ fontSize: 12, color: parseFloat(wd) < 0 ? T.green : T.red, fontFamily: T.mono }}>{parseFloat(wd) > 0 ? "+" : ""}{wd}</div>}
+              </div>}
+            </div>
+            {wcd.length > 1 ? <MiniChart data={wcd} /> : <div style={{ textAlign: "center", color: T.textMuted, fontSize: 13, padding: "12px 0" }}>Mind. 2 Einträge für Chart</div>}
+          </div>
+          <div style={S.lbl}>Session-Verlauf</div>
+          {data.sessions.length === 0 && <div style={{ ...S.card, textAlign: "center", color: T.textMuted, padding: 30, fontSize: 13 }}>Noch keine Sessions abgeschlossen.</div>}
+          {data.sessions.slice(0, 15).map(s => (
+            <div key={s.id} style={{ ...S.card, cursor: "pointer" }} onClick={() => setView({ type: "detail", payload: s })}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div><div style={{ fontSize: 15, fontWeight: 600 }}>{s.workoutName}</div><div style={{ fontSize: 12, color: T.textMuted, marginTop: 2 }}>{fmtDateLong(s.date)}</div></div>
+                <div style={{ textAlign: "right" }}><div style={{ fontSize: 14, fontWeight: 700, color: T.green, fontFamily: T.mono }}>{s.completedPct}%</div><div style={{ fontSize: 11, color: T.textMuted }}>abgeschlossen</div></div>
+              </div>
+            </div>
+          ))}
+        </>}
+      </div>
+    </div>
+  );
+}
+
+// ── Insert Block Menu ─────────────────────────────────────────────────────────
+function InsertBlockMenu({ onAdd, isLast }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ position: "relative", marginBottom: isLast ? 8 : 0 }}>
+      {open ? (
+        <div style={{ display: "flex", gap: 7, flexWrap: "wrap", padding: "6px 0" }}>
+          {[["superset","Super Set",T.accent],["regular","Regulärer Satz",T.textMuted],["cardio","Cardio / Intervall",T.blue]].map(([type, label, color]) => (
+            <button key={type} style={{ ...S.btnGhost, color, borderColor: color + "55", fontSize: 12, padding: "6px 12px" }}
+              onClick={() => { onAdd(type); setOpen(false); }}>+ {label}</button>
+          ))}
+          <button style={{ ...S.btnGhost, fontSize: 12, padding: "6px 10px" }} onClick={() => setOpen(false)}>✕</button>
+        </div>
+      ) : (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "2px 0" }}>
+          <div style={{ flex: 1, height: 1, background: T.border }} />
+          <button style={{ fontSize: 11, color: T.textMuted, background: T.surfaceHover, border: `1px solid ${T.border}`, borderRadius: 20, padding: "3px 12px", cursor: "pointer" }}
+            onClick={() => setOpen(true)}>+ Block einfügen</button>
+          <div style={{ flex: 1, height: 1, background: T.border }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ExImg({ exImg, onChange }) {
+  const ref = useRef(null);
+  const handle = e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => onChange(ev.target.result);
+    reader.readAsDataURL(file);
+  };
+  return (
+    <div style={{ width: 40, height: 40, borderRadius: 8, overflow: "hidden", flexShrink: 0, background: T.surfaceHover, border: `1px solid ${T.border}`, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={() => ref.current?.click()}>
+      <input ref={ref} type="file" accept="image/*" style={{ display: "none" }} onChange={handle} />
+      {exImg ? <img src={exImg} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 16, lineHeight: 1 }}>📷</span>}
+    </div>
+  );
+}
+
+function Builder({ w: initW, folders, onSave, onDelete, onBack }) {
+  const [w, setW] = useState(() => JSON.parse(JSON.stringify({ note: "", image: null, ...initW })));
+  const u = fn => setW(p => { const n = JSON.parse(JSON.stringify(p)); fn(n); return n; });
+  const tog = (arr, v) => arr.includes(v) ? arr.filter(x => x !== v) : [...arr, v];
+  const imgRef = useRef(null);
+  const handleImage = e => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = ev => u(n => { n.image = ev.target.result; }); reader.readAsDataURL(file); };
+  const blockLabel = t => t === "superset" ? "Super Set" : t === "regular" ? "Regulärer Satz" : "Cardio / Intervall";
+  const blockAccent = t => t === "cardio" ? T.blue : T.accent;
+  const isCardioEx = ex => ex.meters !== undefined;
+
+  return (
+    <div style={S.app}>
+      <style>{CSS}</style>
+      <div style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, padding: "13px 16px", display: "flex", alignItems: "center", gap: 12, position: "sticky", top: 0, zIndex: 100, boxShadow: "0 1px 6px rgba(58,46,37,0.07)" }}>
+        <button style={S.btnSm} onClick={onBack}>← Zurück</button>
+        <div style={{ flex: 1, fontSize: 16, fontWeight: 700 }}>Workout bearbeiten</div>
+        <button style={S.btnSmAccent} onClick={() => onSave(w)}>Speichern</button>
+      </div>
+      <div style={{ padding: "14px 14px 120px" }}>
+        <div style={S.lbl}>Name & Ordner</div>
+        <div style={S.card}>
+          <input style={{ ...S.inp, marginBottom: 10 }} value={w.name} onChange={e => u(n => { n.name = e.target.value; })} placeholder="Workout-Name" />
+          <select style={{ ...S.inp, cursor: "pointer" }} value={w.folderId} onChange={e => u(n => { n.folderId = e.target.value; })}>
+            {folders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+          </select>
+        </div>
+        <div style={S.lbl}>Notiz zum Workout</div>
+        <div style={S.card}>
+          <textarea style={{ ...S.inp, minHeight: 80, resize: "vertical", lineHeight: 1.6 }} placeholder="Beschreibung, Hinweise, Ziele..." value={w.note || ""} onChange={e => u(n => { n.note = e.target.value; })} />
+        </div>
+        <div style={S.lbl}>Bild</div>
+        <div style={S.card}>
+          {w.image ? (
+            <div style={{ position: "relative" }}>
+              <img src={w.image} alt="" style={{ width: "100%", borderRadius: 10, maxHeight: 200, objectFit: "cover", display: "block" }} />
+              <button style={{ position: "absolute", top: 8, right: 8, background: "rgba(58,46,37,0.75)", color: "#fff", border: "none", borderRadius: 8, padding: "5px 10px", fontSize: 12, cursor: "pointer" }} onClick={() => u(n => { n.image = null; })}>Entfernen</button>
+            </div>
+          ) : (
+            <div style={{ textAlign: "center" }}>
+              <input ref={imgRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleImage} />
+              <button style={{ ...S.btnGhost, width: "100%", padding: "20px" }} onClick={() => imgRef.current?.click()}>📷 Bild hinzufügen</button>
+            </div>
+          )}
+        </div>
+        <div style={S.lbl}>Trainingsausrüstung</div>
+        <div style={{ ...S.card, display: "flex", flexWrap: "wrap", gap: 7 }}>
+          {EQUIPMENT.map(eq => <button key={eq} style={S.pill(w.equipment.includes(eq))} onClick={() => u(n => { n.equipment = tog(n.equipment, eq); })}>{eq}</button>)}
+        </div>
+        <div style={S.lbl}>Zielmuskeln</div>
+        <div style={{ ...S.card, display: "flex", flexWrap: "wrap", gap: 7 }}>
+          {MUSCLES.map(m => <button key={m} style={S.pill(w.muscles.includes(m), T.green)} onClick={() => u(n => { n.muscles = tog(n.muscles, m); })}>{m}</button>)}
+        </div>
+
+        {w.blocks.map((block, bi) => (
+          <div key={block.id} style={{ marginBottom: 4 }}>
+            {/* Insert block button ABOVE each block */}
+            <InsertBlockMenu onAdd={(type) => u(n => { n.blocks.splice(bi, 0, newBlock(type)); })} />
+
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, marginTop: 6 }}>
+              <div style={{ flex: 1, fontSize: 13, fontWeight: 700, color: blockAccent(block.type), display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                {blockLabel(block.type)}
+                {block.type !== "regular" && <>
+                  <input style={{ ...S.inpSm, width: 38, textAlign: "center", padding: "3px 6px" }} type="number" min={1} max={20} value={block.rounds} onChange={e => u(n => { n.blocks[bi].rounds = parseInt(e.target.value)||1; })} />
+                  <span style={{ fontSize: 12, color: T.textMuted }}>Runden</span>
+                </>}
+              </div>
+              {/* Move up/down */}
+              <button disabled={bi === 0} style={{ ...S.btnSm, padding: "4px 8px", fontSize: 14, opacity: bi === 0 ? 0.3 : 1 }} onClick={() => u(n => { const tmp = n.blocks[bi-1]; n.blocks[bi-1] = n.blocks[bi]; n.blocks[bi] = tmp; })}>↑</button>
+              <button disabled={bi === w.blocks.length - 1} style={{ ...S.btnSm, padding: "4px 8px", fontSize: 14, opacity: bi === w.blocks.length - 1 ? 0.3 : 1 }} onClick={() => u(n => { const tmp = n.blocks[bi+1]; n.blocks[bi+1] = n.blocks[bi]; n.blocks[bi] = tmp; })}>↓</button>
+              <button style={S.btnDanger} onClick={() => u(n => { n.blocks.splice(bi, 1); })}>Entfernen</button>
+            </div>
+            <div style={{ ...S.card, borderLeft: `3px solid ${blockAccent(block.type)}` }}>
+              {block.exercises.map((ex, ei) => (
+                <div key={ex.id} style={{ paddingBottom: 14, marginBottom: ei < block.exercises.length-1 ? 14 : 0, borderBottom: ei < block.exercises.length-1 ? `1px solid ${T.border}` : "none" }}>
+                  <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                    <ExImg exImg={ex.image} onChange={img => u(n => { n.blocks[bi].exercises[ei].image = img; })} />
+                    <span style={{ fontSize: 12, fontWeight: 700, color: T.textMuted, minWidth: 18, marginTop: 12 }}>{LETTERS[ei]}</span>
+                    <input style={{ ...S.inp, flex: 1 }} placeholder="Übungsname" value={ex.name} onChange={e => u(n => { n.blocks[bi].exercises[ei].name = e.target.value; })} />
+                    {block.exercises.length > 1 && <button style={{ ...S.btnDanger, padding: "5px 8px" }} onClick={() => u(n => { n.blocks[bi].exercises.splice(ei,1); })}>✕</button>}
+                  </div>
+                  {isCardioEx(ex) ? (
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8, marginLeft: 26 }}>
+                      {[["Meter","meters","number"],["Min/km","minPerKm","text"],["km/h","kmh","number"]].map(([label, field, type]) => (
+                        <div key={field}>
+                          <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 4, fontWeight: 600, textTransform: "uppercase" }}>{label}</div>
+                          <input style={{ ...S.inpSm, width: "100%" }} placeholder="–" value={ex[field] || ""} onChange={e => u(n => { n.blocks[bi].exercises[ei][field] = e.target.value; })} type={type} inputMode={type === "number" ? "decimal" : "text"} />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginLeft: 26 }}>
+                      <div>
+                        <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 4, fontWeight: 600, textTransform: "uppercase" }}>Wdhl / Sek</div>
+                        <input style={{ ...S.inpSm, width: 90 }} placeholder="z.B. 8–10" value={ex.reps || ""} onChange={e => u(n => { n.blocks[bi].exercises[ei].reps = e.target.value; })} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 4, fontWeight: 600, textTransform: "uppercase" }}>Pause danach</div>
+                        <input style={{ ...S.inpSm, width: 110 }} placeholder="1 m 30 s" value={ex.pause || ""} onChange={e => u(n => { n.blocks[bi].exercises[ei].pause = e.target.value; })} />
+                      </div>
+                    </div>
+                  )}
+                  {isCardioEx(ex) && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: 26, marginTop: 8 }}>
+                      <span style={{ fontSize: 12, color: T.textMuted }}>Pause:</span>
+                      <input style={{ ...S.inpSm, width: 110 }} placeholder="1 m" value={ex.pause || ""} onChange={e => u(n => { n.blocks[bi].exercises[ei].pause = e.target.value; })} />
+                    </div>
+                  )}
+                </div>
+              ))}
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button style={{ ...S.btnGhost, flex: 1 }} onClick={() => u(n => { n.blocks[bi].exercises.push(newStrEx()); })}>+ Kraft</button>
+                <button style={{ ...S.btnGhost, flex: 1, color: T.blue, borderColor: T.blue + "44" }} onClick={() => u(n => { n.blocks[bi].exercises.push(newCardioEx()); })}>+ Cardio</button>
+              </div>
+            </div>
+          </div>
+        ))}
+
+        {/* Insert at end */}
+        <InsertBlockMenu onAdd={(type) => u(n => { n.blocks.push(newBlock(type)); })} isLast />
+        <button style={S.btnPrimary} onClick={() => onSave(w)}>Workout speichern</button>
+        {initW.name && <button style={S.btnRed} onClick={() => onDelete(initW.id)}>Workout löschen</button>}
+      </div>
+    </div>
+  );
+}
+
+function Session({ w, lastState, activeSession, onFinish, onSaveProgress, onClearActive, onBack }) {
+  const isCardioEx = ex => ex.meters !== undefined;
+
+  // Build initial state: prefer activeSession > lastState > empty
+  const init = () => {
+    const s = {};
+    w.blocks.forEach(b => {
+      s[b.id] = {};
+      for (let r = 0; r < b.rounds; r++) {
+        s[b.id][r] = {};
+        b.exercises.forEach(ex => {
+          const last = lastState?.[b.id]?.[r]?.[ex.id];
+          if (isCardioEx(ex)) {
+            s[b.id][r][ex.id] = { meters: ex.meters||"", minPerKm: last?.minPerKm||"", kmh: last?.kmh||"", checked: false, actualReps: "" };
+          } else {
+            s[b.id][r][ex.id] = { kg: last?.kg||"", checked: false, actualReps: last?.actualReps||"" };
+          }
+        });
+      }
+    });
+    return s;
+  };
+
+  const [state, setState] = useState(() => activeSession?.state || init());
+  const [note, setNote] = useState(activeSession?.note || "");
+  // Timer: timestamp-based so it survives tab switches
+  const [timerEnd, setTimerEnd] = useState(null);   // epoch ms when pause ends
+  const [timerMeta, setTimerMeta] = useState(null); // { total, exName }
+  const [timerRem, setTimerRem] = useState(0);
+  const [showResumePrompt, setShowResumePrompt] = useState(!!activeSession);
+  const tRef = useRef(null);
+  const [confirmBack, setConfirmBack] = useState(false);
+
+  // Tick loop uses end-timestamp so background tabs stay accurate
+  useEffect(() => {
+    if (!timerEnd) { clearInterval(tRef.current); return; }
+    const tick = () => {
+      const rem = Math.max(0, Math.round((timerEnd - Date.now()) / 1000));
+      setTimerRem(rem);
+      if (rem <= 0) { clearInterval(tRef.current); setTimerEnd(null); setTimerMeta(null); }
+    };
+    tick();
+    tRef.current = setInterval(tick, 500);
+    return () => clearInterval(tRef.current);
+  }, [timerEnd]);
+
+  const startPause = useCallback((secs, exName) => {
+    setTimerEnd(Date.now() + secs * 1000);
+    setTimerMeta({ total: secs, exName });
+    setTimerRem(secs);
+  }, []);
+
+  const stopTimer = () => { clearInterval(tRef.current); setTimerEnd(null); setTimerMeta(null); setTimerRem(0); };
+
+  let total = 0, done = 0;
+  w.blocks.forEach(b => { for (let r = 0; r < b.rounds; r++) b.exercises.forEach(ex => { total++; if (state[b.id]?.[r]?.[ex.id]?.checked) done++; }); });
+  const pct = total > 0 ? Math.round((done/total)*100) : 0;
+
+  const toggleCheck = (bid, r, eid, pauseStr, exName) => {
+    setState(p => {
+      const n = JSON.parse(JSON.stringify(p));
+      const was = n[bid][r][eid].checked;
+      n[bid][r][eid].checked = !was;
+      if (!was) startPause(parsePauseSecs(pauseStr), exName);
+      return n;
+    });
+  };
+  const setField = (bid, r, eid, field, val) => setState(p => { const n = JSON.parse(JSON.stringify(p)); n[bid][r][eid][field] = val; return n; });
+  const blockAccent = t => t === "cardio" ? T.blue : T.accent;
+
+  // Auto-save progress every 30s
+  useEffect(() => {
+    const id = setInterval(() => onSaveProgress(w.id, state, note, pct), 30000);
+    return () => clearInterval(id);
+  }, [state, note, pct]);
+
+  const handleBack = () => {
+    if (done > 0) { setConfirmBack(true); } else { onClearActive(); onBack(); }
+  };
+
+  const timerActive = timerEnd && timerMeta;
+
+  return (
+    <div style={S.app}>
+      <style>{CSS}</style>
+
+      {/* Pause timer bottom bar */}
+      {timerActive && (
+        <PauseTimer
+          timer={{ rem: timerRem, total: timerMeta.total, exName: timerMeta.exName }}
+          onStop={stopTimer}
+        />
+      )}
+
+      {/* Resume prompt */}
+      {showResumePrompt && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(58,46,37,0.5)", zIndex: 998, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 24px" }}>
+          <div style={{ background: T.surface, borderRadius: 20, padding: "24px", width: "100%", maxWidth: 340 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Training fortsetzen?</div>
+            <div style={{ fontSize: 13, color: T.textMuted, marginBottom: 20, lineHeight: 1.5 }}>Du hast ein angefangenes Training – möchtest du weitermachen oder neu starten?</div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button style={{ flex: 1, padding: "11px", background: T.surfaceHover, color: T.text, border: `1px solid ${T.border}`, borderRadius: 10, fontSize: 13, fontWeight: 500, cursor: "pointer" }}
+                onClick={() => { setState(init()); setNote(""); setShowResumePrompt(false); }}>
+                Neu starten
+              </button>
+              <button style={{ flex: 1, padding: "11px", background: T.accent, color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+                onClick={() => setShowResumePrompt(false)}>
+                Fortsetzen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm back */}
+      {confirmBack && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(58,46,37,0.5)", zIndex: 998, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 24px" }}>
+          <div style={{ background: T.surface, borderRadius: 20, padding: "24px", width: "100%", maxWidth: 340 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Training verlassen?</div>
+            <div style={{ fontSize: 13, color: T.textMuted, marginBottom: 20, lineHeight: 1.5 }}>Dein Fortschritt wird gespeichert. Du kannst später weitermachen.</div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button style={{ flex: 1, padding: "11px", background: T.surfaceHover, color: T.text, border: `1px solid ${T.border}`, borderRadius: 10, fontSize: 13, fontWeight: 500, cursor: "pointer" }}
+                onClick={() => setConfirmBack(false)}>
+                Weitertrainieren
+              </button>
+              <button style={{ flex: 1, padding: "11px", background: T.surface, color: T.red, border: `1px solid ${T.red}`, borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+                onClick={() => { onSaveProgress(w.id, state, note, pct); onBack(); }}>
+                Speichern & Verlassen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, padding: "12px 16px", position: "sticky", top: 0, zIndex: 100, boxShadow: "0 1px 6px rgba(58,46,37,0.07)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+          <button style={S.btnSm} onClick={handleBack}>← Zurück</button>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 16, fontWeight: 700 }}>{w.name}</div>
+            <div style={{ fontSize: 12, color: T.textMuted }}>{pct}% abgeschlossen</div>
+          </div>
+          <div style={{ fontFamily: T.mono, fontSize: 16, fontWeight: 700, color: T.accent }}>{pct}%</div>
+        </div>
+        <div style={{ height: 4, background: T.border, borderRadius: 2, overflow: "hidden" }}>
+          <div style={{ width: `${pct}%`, height: "100%", background: T.accent, borderRadius: 2, transition: "width .4s" }} />
+        </div>
+      </div>
+
+      <div style={{ padding: "14px 14px 120px" }}>
+        {w.image && <div style={{ marginBottom: 12, borderRadius: 14, overflow: "hidden", height: 140 }}><img src={w.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /></div>}
+        {w.note && <div style={{ ...S.card, marginBottom: 12, background: T.surfaceHover }}><div style={{ fontSize: 11, color: T.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 5 }}>Coach-Notiz</div><div style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-line" }}>{w.note}</div></div>}
+        {lastState && <div style={{ fontSize: 12, color: T.green, background: T.greenSoft, borderRadius: 8, padding: "6px 12px", marginBottom: 10 }}>↩ Werte vom letzten Training vorausgefüllt</div>}
+
+        <div style={S.card}>
+          <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 10 }}>{w.blocks.reduce((s,b)=>s+b.exercises.length,0)} Übungen · {w.blocks.reduce((s,b)=>s+b.exercises.length*b.rounds,0)} Sätze</div>
+          {w.blocks.map(b => (
+            <div key={b.id} style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: blockAccent(b.type), marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>{b.type==="superset"?"Super Set":"Regulärer Satz"} · {b.rounds} Runden</div>
+              {b.exercises.map((ex, ei) => (
+                <div key={ex.id} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", borderBottom: `1px solid ${T.border}` }}>
+                  <span style={{ fontSize: 13 }}><b style={{ color: T.textMuted }}>{LETTERS[ei]}</b>{"  "}{ex.name}</span>
+                  <span style={{ fontSize: 11, color: T.textMuted, fontFamily: T.mono }}>{isCardioEx(ex) ? [ex.meters&&`${ex.meters}m`,ex.reps].filter(Boolean).join(" ") : ex.reps}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        {w.blocks.map(block => (
+          <div key={block.id}>
+            <div style={{ fontSize: 12, fontWeight: 700, margin: "16px 0 8px", color: blockAccent(block.type), textTransform: "uppercase", letterSpacing: "0.07em" }}>
+              {block.type==="superset"?"Super Set":"Regulärer Satz"}
+            </div>
+            {Array.from({ length: block.rounds }).map((_, r) => {
+              const doneR = block.exercises.filter(ex => state[block.id]?.[r]?.[ex.id]?.checked).length;
+              return (
+                <div key={r} style={{ ...S.card, borderLeft: `3px solid ${blockAccent(block.type)}`, marginBottom: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, paddingBottom: 10, borderBottom: `1px solid ${T.border}` }}>
+                    <span style={{ fontSize: 14, fontWeight: 600 }}>Runde {r+1}</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: doneR===block.exercises.length ? T.green : T.textMuted, fontFamily: T.mono }}>{doneR}/{block.exercises.length}</span>
+                  </div>
+                  {block.exercises.map((ex, ei) => {
+                    const st = state[block.id]?.[r]?.[ex.id] || {};
+                    const ps = parsePauseSecs(ex.pause);
+                    const cardio = isCardioEx(ex);
+                    return (
+                      <div key={ex.id} style={{ padding: "10px 0", borderBottom: ei < block.exercises.length-1 ? `1px solid ${T.border}` : "none" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          {ex.image ? (
+                            <div style={{ width: 36, height: 36, borderRadius: 7, overflow: "hidden", flexShrink: 0 }}>
+                              <img src={ex.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: 12, fontWeight: 700, color: blockAccent(block.type), minWidth: 20 }}>{LETTERS[ei]}</span>
+                          )}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 500, color: st.checked ? T.textMuted : T.text, textDecoration: st.checked ? "line-through" : "none", display: "flex", alignItems: "center", gap: 5 }}>
+                              {ex.image && <span style={{ fontSize: 11, fontWeight: 700, color: blockAccent(block.type) }}>{LETTERS[ei]}</span>}
+                              {!cardio && ex.reps && <span style={{ fontFamily: T.mono, fontSize: 11, color: T.textMuted }}>{ex.reps}</span>}
+                              <span>{ex.name}</span>
+                            </div>
+                            {cardio && <div style={{ fontSize: 11, color: T.textMuted, marginTop: 1 }}>{[ex.meters&&`${ex.meters}m`,ex.reps].filter(Boolean).join(" · ")}</div>}
+                          </div>
+                          {/* Reps tatsächlich */}
+                          <input
+                            style={{ ...S.inpSm, width: 48, textAlign: "center", fontSize: 12 }}
+                            placeholder="Reps"
+                            value={st.actualReps||""}
+                            onChange={e => setField(block.id,r,ex.id,"actualReps",e.target.value)}
+                          />
+                          {/* kg – text+decimal so comma works on iOS */}
+                          {!cardio && (
+                            <input
+                              style={{ ...S.inpSm, width: 52, textAlign: "center", fontSize: 12 }}
+                              placeholder="kg"
+                              value={st.kg||""}
+                              type="text"
+                              inputMode="decimal"
+                              onChange={e => setField(block.id,r,ex.id,"kg", e.target.value.replace(",","."))}
+                            />
+                          )}
+                          {cardio && (
+                            <input
+                              style={{ ...S.inpSm, width: 60, textAlign: "center", fontSize: 11 }}
+                              placeholder="min/km"
+                              value={st.minPerKm||""}
+                              type="text"
+                              inputMode="decimal"
+                              onChange={e => setField(block.id,r,ex.id,"minPerKm", e.target.value)}
+                            />
+                          )}
+                          <button
+                            title={`Pause: ${ex.pause}`}
+                            style={{ background: T.surfaceHover, border: `1px solid ${T.border}`, borderRadius: 8, cursor: "pointer", fontSize: 10, padding: "5px 6px", color: T.textMuted, fontFamily: T.mono, flexShrink: 0 }}
+                            onClick={() => startPause(ps, ex.name)}
+                          >⏱{fmtSecs(ps)}</button>
+                          <div style={S.chk(st.checked)} onClick={() => toggleCheck(block.id, r, ex.id, ex.pause, ex.name)}>
+                            {st.checked && <span style={{ color: "#fff", fontSize: 14, fontWeight: 700 }}>✓</span>}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+
+        <div style={S.lbl}>Session-Notiz</div>
+        <div style={S.card}>
+          <textarea style={{ ...S.inp, minHeight: 80, resize: "vertical", lineHeight: 1.6 }} placeholder="Energie, PRs, Anmerkungen..." value={note} onChange={e => setNote(e.target.value)} />
+        </div>
+        <button style={S.btnPrimary} onClick={() => {
+          onFinish({ id: uid(), date: todayStr(), workoutId: w.id, workoutName: w.name, completedPct: pct, state, note });
+        }}>
+          Abschließen · {pct}% ✓
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
+function Detail({ s, workouts, onBack }) {
+  const w = workouts.find(x => x.id === s.workoutId);
+  const isCardioEx = ex => ex && ex.meters !== undefined;
+  return (
+    <div style={S.app}>
+      <style>{CSS}</style>
+      <div style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, padding: "13px 16px", display: "flex", alignItems: "center", gap: 12, position: "sticky", top: 0, zIndex: 100, boxShadow: "0 1px 6px rgba(58,46,37,0.07)" }}>
+        <button style={S.btnSm} onClick={onBack}>← Zurück</button>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>{s.workoutName}</div>
+          <div style={{ fontSize: 12, color: T.textMuted }}>{fmtDateLong(s.date)} · <span style={{ color: T.green, fontFamily: T.mono }}>{s.completedPct}%</span></div>
+        </div>
+      </div>
+      <div style={{ padding: "14px 14px" }}>
+        {w?.blocks.map(block => (
+          <div key={block.id}>
+            {Array.from({ length: block.rounds }).map((_, r) => (
+              <div key={r} style={{ ...S.card, borderLeft: `3px solid ${T.accent}` }}>
+                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10, color: T.accent, textTransform: "uppercase", letterSpacing: "0.07em" }}>
+                  {block.type==="superset"?"Super Set":"Regulärer Satz"} · Runde {r+1}
+                </div>
+                {block.exercises.map((ex, ei) => {
+                  const st = s.state?.[block.id]?.[r]?.[ex.id] || {};
+                  return (
+                    <div key={ex.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: ei < block.exercises.length-1 ? `1px solid ${T.border}` : "none" }}>
+                      <span style={{ fontSize: 13 }}><b style={{ color: T.textMuted }}>{LETTERS[ei]}</b>{"  "}{ex.name}</span>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        {isCardioEx(ex) ? <span style={{ fontSize: 11, fontFamily: T.mono, color: T.textSub }}>{st.minPerKm ? `${st.minPerKm} min/km` : ""}</span> : <span style={{ fontSize: 12, fontFamily: T.mono, color: T.textSub }}>{[st.actualReps && `${st.actualReps} Reps`, st.kg && `${st.kg}kg`].filter(Boolean).join(" · ")}</span>}
+                        <span>{st.checked ? "✅" : "⬜️"}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        ))}
+        {s.note && <div style={S.card}><div style={{ fontSize: 11, color: T.textMuted, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600 }}>Session-Notiz</div><div style={{ fontSize: 14, lineHeight: 1.6 }}>{s.note}</div></div>}
+      </div>
+    </div>
+  );
+}
+
+
+// Mount the app
+const container = document.getElementById('root');
+const root = ReactDOM.createRoot(container);
+root.render(React.createElement(App));
+
+  </script>
+
+  <script>
+    // Register Service Worker for PWA
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(() => {});
+      });
+    }
+  </script>
+</body>
+</html>
